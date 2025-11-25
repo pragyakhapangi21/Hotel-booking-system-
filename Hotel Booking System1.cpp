@@ -3,6 +3,8 @@
 #include <string>
 #include <limits>
 #include <vector>
+#include <cstdlib>
+
 using namespace std;
 
 // ---------- BASE64 ENCODE/DECODE (C++98 Compatible) ----------
@@ -16,20 +18,19 @@ string base64_encode(const string &in) {
         val = (val << 8) + c;
         valb += 8;
         while (valb >= 0) {
-            out.push_back(base64_chars[(val>>valb)&0x3F]);
+            out.push_back(base64_chars[(val >> valb) & 0x3F]);
             valb -= 6;
         }
     }
-    if (valb > -6) out.push_back(base64_chars[((val<<8)>>(valb+8))&0x3F]);
-    while (out.size()%4) out.push_back('=');
+    if (valb > -6) out.push_back(base64_chars[((val << 8) >> (valb + 8)) & 0x3F]);
+    while (out.size() % 4) out.push_back('=');
     return out;
 }
 
 string base64_decode(const string &in) {
     string out;
-    vector<int> T(256,-1);
-    for (int i=0; i<64; i++) T[(int)base64_chars[i]] = i;
-
+    vector<int> T(256, -1);
+    for (int i = 0; i < 64; i++) T[(int)base64_chars[i]] = i;
     int val = 0, valb = -8;
     for (size_t i = 0; i < in.size(); i++) {
         unsigned char c = in[i];
@@ -42,6 +43,135 @@ string base64_decode(const string &in) {
         }
     }
     return out;
+}
+
+// ---------------------- HELPERS ----------------------
+void flushInput() {
+    cin.ignore(numeric_limits<streamsize>::max(), '\n');
+}
+
+void clearScreen() {
+#ifdef _WIN32
+    system("cls");
+#else
+    system("clear");
+#endif
+}
+
+struct Admin {
+    string username;
+    string password; // decoded
+};
+
+vector<Admin> admins;
+
+void saveAdmins() {
+    ofstream file("admin.txt");
+    for (size_t i = 0; i < admins.size(); ++i) {
+        file << admins[i].username << '|' << base64_encode(admins[i].password) << '\n';
+    }
+    file.close();
+}
+
+void loadAdmins() {
+    admins.clear();
+    ifstream file("admin.txt");
+    if (!file) return;
+
+    string line;
+    vector<string> rawLines;
+    while (getline(file, line)) {
+        rawLines.push_back(line);
+        size_t delimPos = line.find('|');
+        if (delimPos != string::npos) {
+            string user = line.substr(0, delimPos);
+            string passEncoded = line.substr(delimPos + 1);
+            Admin a;
+            a.username = user;
+            a.password = base64_decode(passEncoded);
+            admins.push_back(a);
+        }
+    }
+    file.close();
+
+    if (!admins.empty()) return;
+
+    if (rawLines.size() >= 2) {
+        Admin legacy;
+        legacy.username = rawLines[0];
+        legacy.password = base64_decode(rawLines[1]);
+        admins.push_back(legacy);
+        saveAdmins(); // convert legacy file to the new pipe-delimited format
+    }
+}
+
+bool usernameExists(const string &user) {
+    for (size_t i = 0; i < admins.size(); ++i) {
+        if (admins[i].username == user) return true;
+    }
+    return false;
+}
+
+void addAdminInteractive() {
+    flushInput();
+    string user, pass;
+    cout << "\n===== ADD NEW ADMIN =====\n";
+    cout << "Enter username: ";
+    getline(cin, user);
+
+    if (user.empty()) {
+        cout << "Username cannot be empty.\n";
+        return;
+    }
+    if (usernameExists(user)) {
+        cout << "Username already exists.\n";
+        return;
+    }
+
+    cout << "Enter password: ";
+    getline(cin, pass);
+    if (pass.empty()) {
+        cout << "Password cannot be empty.\n";
+        return;
+    }
+
+    Admin a;
+    a.username = user;
+    a.password = pass;
+    admins.push_back(a);
+    saveAdmins();
+    cout << "Admin added successfully.\n";
+}
+
+void ensureAdminSetup() {
+    if (!admins.empty()) return;
+
+    cout << "\n===== INITIAL ADMIN SETUP =====";
+    flushInput();
+    while (true) {
+        string user, pass;
+        cout << "Create username: ";
+        getline(cin, user);
+        cout << "Create password: ";
+        getline(cin, pass);
+
+        if (user.empty() || pass.empty()) {
+            cout << "Username and password must not be empty.\n";
+            continue;
+        }
+
+        Admin a;
+        a.username = user;
+        a.password = pass;
+        admins.push_back(a);
+        saveAdmins();
+
+        char choice;
+        cout << "Add another admin? (y/n): ";
+        cin >> choice;
+        flushInput();
+        if (choice != 'y' && choice != 'Y') break;
+    }
 }
 
 // ---------------------- ROOM & BOOKING STRUCTS ----------------------
@@ -66,59 +196,51 @@ Booking bookings[10];
 int bookingCount = 0;
 
 // ---------------------- ADMIN LOGIN ----------------------
-bool adminLogin() {
-    string savedUser, savedPassEncoded;
-    ifstream file("admin.txt");
-
-    // ---------------- FIRST TIME LOGIN ----------------
-    if (!file) {
-        cout << "\n===== SET ADMIN ACCOUNT (FIRST TIME) =====\n";
-        cout << "Create Username: ";
-        getline(cin, savedUser);
-
-        string savedPass;
-        cout << "Create Password: ";
-        getline(cin, savedPass);
-
-        savedPassEncoded = base64_encode(savedPass);
-
-        ofstream newFile("admin.txt");
-        newFile << savedUser << endl << savedPassEncoded;
-        newFile.close();
-
-        cout << "Admin account created successfully!\n";
-        return true;
+bool validateCredentials(const string &user, const string &pass) {
+    for (size_t i = 0; i < admins.size(); ++i) {
+        if (admins[i].username == user && admins[i].password == pass) return true;
     }
+    return false;
+}
 
-    // ---------------- NORMAL LOGIN ----------------
-    getline(file, savedUser);
-    getline(file, savedPassEncoded);
-    file.close();
-
-    string savedPass = base64_decode(savedPassEncoded);
-
-    cout << "\n===== ADMIN LOGIN =====\n";
-    string user, pass;
-    cin.ignore(numeric_limits<streamsize>::max(), '\n');
-    cout << "Username: ";
-    getline(cin, user);
-    cout << "Password: ";
-    getline(cin, pass);
-
-    if (user == savedUser && pass == savedPass) {
-        cout << "Login successful!\n";
-        return true;
-    } else {
-        cout << "Invalid username or password.\n";
+bool adminLogin() {
+    ensureAdminSetup();
+    loadAdmins();
+    if (admins.empty()) {
+        cout << "Admin setup failed.\n";
         return false;
     }
+
+    for (int attempt = 1; attempt <= 3; ++attempt) {
+        clearScreen();
+        cout << "\n===== ADMIN LOGIN ===== (Attempt " << attempt << " of 3)";
+        flushInput();
+        string user, pass;
+        cout << "Username: ";
+        getline(cin, user);
+        cout << "Password: ";
+        getline(cin, pass);
+
+        if (validateCredentials(user, pass)) {
+            cout << "Login successful!\n";
+            return true;
+        }
+
+        cout << "Invalid username or password.\n";
+        if (attempt < 3) {
+            cout << "Press Enter to retry...";
+            cin.get();
+        }
+    }
+
+    cout << "Too many failed attempts. Exiting.\n";
+    return false;
 }
 
 // ---------------------- CREATE ROOMS ----------------------
 void createRooms() {
     string types[3] = {"Standard", "Deluxe", "Suite"};
     double prices[3] = {2000, 3500, 5000};
-
     for (int i = 0; i < 10; i++) {
         rooms[i].roomNo = 101 + i;
         rooms[i].type = types[i % 3];
@@ -131,7 +253,6 @@ void createRooms() {
 void saveToFile() {
     ofstream file("bookings.txt");
     file << bookingCount << endl;
-
     for (int i = 0; i < bookingCount; i++) {
         file << bookings[i].customerName << endl;
         file << bookings[i].phone << endl;
@@ -140,11 +261,9 @@ void saveToFile() {
         file << bookings[i].checkOut << endl;
         file << bookings[i].paymentMethod << endl;
     }
-
     for (int i = 0; i < 10; i++) {
         file << rooms[i].isBooked << endl;
     }
-
     file.close();
 }
 
@@ -155,7 +274,6 @@ void loadFromFile() {
 
     file >> bookingCount;
     file.ignore();
-
     for (int i = 0; i < bookingCount; i++) {
         getline(file, bookings[i].customerName);
         getline(file, bookings[i].phone);
@@ -165,11 +283,9 @@ void loadFromFile() {
         getline(file, bookings[i].checkOut);
         getline(file, bookings[i].paymentMethod);
     }
-
     for (int i = 0; i < 10; i++) {
         file >> rooms[i].isBooked;
     }
-
     file.close();
 }
 
@@ -187,6 +303,7 @@ void sortRooms() {
 }
 
 void viewRooms() {
+    clearScreen();
     cout << "\n===== ROOM LIST (Sorted by Price) =====\n";
     sortRooms();
     for (int i = 0; i < 10; i++) {
@@ -206,16 +323,16 @@ void addBooking() {
     }
 
     Booking b;
+    flushInput();
     cout << "\nEnter Customer Name: ";
-    cin.ignore();
     getline(cin, b.customerName);
-
     cout << "Phone: ";
     getline(cin, b.phone);
 
     viewRooms();
     cout << "Enter Room Number to Book: ";
     cin >> b.roomNo;
+    flushInput();
 
     bool found = false;
     for (int i = 0; i < 10; i++) {
@@ -225,20 +342,17 @@ void addBooking() {
             break;
         }
     }
-
     if (!found) {
         cout << "Room not available!\n";
         return;
     }
 
     cout << "Check-in Date (DD/MM/YYYY): ";
-    cin >> b.checkIn;
-
+    getline(cin, b.checkIn);
     cout << "Check-out Date (DD/MM/YYYY): ";
-    cin >> b.checkOut;
-
+    getline(cin, b.checkOut);
     cout << "Payment Method (Cash/Online/Card): ";
-    cin >> b.paymentMethod;
+    getline(cin, b.paymentMethod);
 
     bookings[bookingCount++] = b;
     saveToFile();
@@ -247,9 +361,9 @@ void addBooking() {
 
 // ---------------------- SEARCH & DELETE ----------------------
 void searchCustomer() {
+    flushInput();
     string name;
     cout << "\nEnter customer name to search: ";
-    cin.ignore();
     getline(cin, name);
 
     for (int i = 0; i < bookingCount; i++) {
@@ -269,17 +383,15 @@ void deleteBooking() {
     int room;
     cout << "\nEnter room number to delete booking: ";
     cin >> room;
+    flushInput();
 
     for (int i = 0; i < bookingCount; i++) {
         if (bookings[i].roomNo == room) {
-
             for (int j = 0; j < 10; j++)
                 if (rooms[j].roomNo == room)
                     rooms[j].isBooked = false;
-
             for (int k = i; k < bookingCount - 1; k++)
                 bookings[k] = bookings[k + 1];
-
             bookingCount--;
             saveToFile();
             cout << "Booking deleted.\n";
@@ -291,56 +403,61 @@ void deleteBooking() {
 
 // ---------------------- CHANGE PASSWORD ----------------------
 void changePassword() {
-    string oldUser, oldPassEncoded;
-    ifstream file("admin.txt");
-
-    if (!file) {
-        cout << "Admin file missing!\n";
+    loadAdmins();
+    if (admins.empty()) {
+        cout << "No admin accounts available.\n";
         return;
     }
 
-    getline(file, oldUser);
-    getline(file, oldPassEncoded);
-    file.close();
-
-    string oldPass = base64_decode(oldPassEncoded);
-
-    string u, p;
+    flushInput();
     cout << "\n===== CHANGE ADMIN PASSWORD =====\n";
-    cin.ignore(numeric_limits<streamsize>::max(), '\n');
+    string u, p;
     cout << "Enter current username: ";
     getline(cin, u);
     cout << "Enter current password: ";
     getline(cin, p);
 
-    if (u == oldUser && p == oldPass) {
-        string newUser, newPass;
-        cout << "Enter new username: ";
-        getline(cin, newUser);
-        cout << "Enter new password: ";
-        getline(cin, newPass);
+    for (size_t i = 0; i < admins.size(); ++i) {
+        if (admins[i].username == u && admins[i].password == p) {
+            string newUser, newPass;
+            cout << "Enter new username: ";
+            getline(cin, newUser);
+            cout << "Enter new password: ";
+            getline(cin, newPass);
 
-        ofstream fileOut("admin.txt");
-        fileOut << newUser << endl << base64_encode(newPass);
-        fileOut.close();
+            if (newUser.empty() || newPass.empty()) {
+                cout << "Username or password cannot be empty.\n";
+                return;
+            }
 
-        cout << "Password changed successfully!\n";
-    } else {
-        cout << "Incorrect username or password!\n";
+            admins[i].username = newUser;
+            admins[i].password = newPass;
+            saveAdmins();
+            cout << "Password changed successfully!\n";
+            return;
+        }
     }
+    cout << "Incorrect username or password!\n";
 }
 
 // ---------------------- MAIN MENU ----------------------
+void addAdminAccount() {
+    loadAdmins();
+    addAdminInteractive();
+}
+
 void menu() {
     int ch;
     do {
+        clearScreen();
         cout << "\n===== HOTEL BOOKING SYSTEM =====\n";
         cout << "1. View Rooms\n";
         cout << "2. Add Booking\n";
         cout << "3. Search Customer\n";
         cout << "4. Delete Booking\n";
         cout << "5. Change Admin Password\n";
-        cout << "6. Exit\n";
+        cout << "6. Add Admin Account\n";
+        cout << "7. Exit\n";
         cout << "Choose option: ";
         cin >> ch;
 
@@ -350,13 +467,20 @@ void menu() {
             case 3: searchCustomer(); break;
             case 4: deleteBooking(); break;
             case 5: changePassword(); break;
-            case 6: cout << "Goodbye!\n"; break;
+            case 6: addAdminAccount(); break;
+            case 7: cout << "Goodbye!\n"; break;
             default: cout << "Invalid option.\n";
         }
-    } while (ch != 6);
+
+        if (ch != 7) {
+            cout << "\nPress Enter to continue...";
+            flushInput();
+        }
+    } while (ch != 7);
 }
 
 int main() {
+    loadAdmins();
     if (!adminLogin()) return 0;
 
     createRooms();
