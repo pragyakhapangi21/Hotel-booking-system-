@@ -4,6 +4,7 @@
 #include <limits>
 #include <vector>
 #include <cstdlib>
+#include <conio.h> 
 
 using namespace std;
 
@@ -45,9 +46,31 @@ string base64_decode(const string &in) {
     return out;
 }
 
+// ---------------------- CUSTOM HIDDEN INPUT (WINDOWS ONLY) ----------------------
+void getHiddenPass(std::string& pass) {
+    pass.clear();
+    
+    char ch;
+    // Reads input until Enter ('\r' or '\n') is pressed
+    while ((ch = _getch()) != '\r' && ch != '\n') {
+        if (ch == '\b') { // Handle Backspace
+            if (!pass.empty()) {
+                pass.pop_back();
+                std::cout << "\b \b"; 
+            }
+        } else {
+            pass += ch;
+            std::cout << '*';
+        }
+    }
+    std::cout << std::endl; 
+}
+
 // ---------------------- HELPERS ----------------------
 void flushInput() {
-    cin.ignore(numeric_limits<streamsize>::max(), '\n');
+    if (cin.peek() != EOF) {
+        cin.ignore(numeric_limits<streamsize>::max(), '\n');
+    }
 }
 
 void clearScreen() {
@@ -106,8 +129,10 @@ void loadAdmins() {
 }
 
 bool usernameExists(const string &user) {
-    for (size_t i = 0; i < admins.size(); ++i) {
-        if (admins[i].username == user) return true;
+    for (size_t i = 0; i < admins.size(); ++i) 
+	{
+        if (admins[i].username == user) 
+		return true;
     }
     return false;
 }
@@ -115,7 +140,7 @@ bool usernameExists(const string &user) {
 void addAdminInteractive() {
     flushInput();
     string user, pass;
-    cout << "\n===== ADD NEW ADMIN =====\n";
+    cout << "\n===== ADD NEW ADMIN ====="<<endl;
     cout << "Enter username: ";
     getline(cin, user);
 
@@ -129,7 +154,8 @@ void addAdminInteractive() {
     }
 
     cout << "Enter password: ";
-    getline(cin, pass);
+    getHiddenPass(pass); 
+    
     if (pass.empty()) {
         cout << "Password cannot be empty.\n";
         return;
@@ -147,25 +173,21 @@ void ensureAdminSetup() {
     if (!admins.empty()) return;
 
     cout << "\n===== INITIAL ADMIN SETUP =====";
-    flushInput();
     while (true) {
         string user, pass;
         cout << "Create username: ";
         getline(cin, user);
         cout << "Create password: ";
-        getline(cin, pass);
-
+        getHiddenPass(pass); 
         if (user.empty() || pass.empty()) {
             cout << "Username and password must not be empty.\n";
             continue;
         }
-
         Admin a;
         a.username = user;
         a.password = pass;
         admins.push_back(a);
         saveAdmins();
-
         char choice;
         cout << "Add another admin? (y/n): ";
         cin >> choice;
@@ -214,12 +236,13 @@ bool adminLogin() {
     for (int attempt = 1; attempt <= 3; ++attempt) {
         clearScreen();
         cout << "\n===== ADMIN LOGIN ===== (Attempt " << attempt << " of 3)";
-        flushInput();
+        flushInput(); 
         string user, pass;
         cout << "Username: ";
         getline(cin, user);
+        
         cout << "Password: ";
-        getline(cin, pass);
+        getHiddenPass(pass); 
 
         if (validateCredentials(user, pass)) {
             cout << "Login successful!\n";
@@ -229,6 +252,7 @@ bool adminLogin() {
         cout << "Invalid username or password.\n";
         if (attempt < 3) {
             cout << "Press Enter to retry...";
+            cin.ignore(numeric_limits<streamsize>::max(), '\n'); 
             cin.get();
         }
     }
